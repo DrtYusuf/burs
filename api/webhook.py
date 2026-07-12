@@ -3,11 +3,11 @@ Vercel serverless function - Telegram webhook endpoint.
 """
 
 import os
-import json
 import asyncio
 import logging
 
 from dotenv import load_dotenv
+from flask import Flask, request
 from telegram import Update, ReplyKeyboardMarkup, ReplyKeyboardRemove
 from telegram.ext import (
     Application,
@@ -112,8 +112,7 @@ async def cmd_iptal(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     return ConversationHandler.END
 
 
-# Application singleton
-app = Application.builder().token(BOT_TOKEN).build()
+tg_app = Application.builder().token(BOT_TOKEN).build()
 
 conv_handler = ConversationHandler(
     entry_points=[CommandHandler("start", cmd_start)],
@@ -122,28 +121,25 @@ conv_handler = ConversationHandler(
     },
     fallbacks=[CommandHandler("iptal", cmd_iptal)],
 )
-app.add_handler(conv_handler)
+tg_app.add_handler(conv_handler)
 
 
 async def process_update(event_body: dict):
-    async with app:
-        update = Update.de_json(event_body, app.bot)
-        await app.process_update(update)
+    async with tg_app:
+        update = Update.de_json(event_body, tg_app.bot)
+        await tg_app.process_update(update)
 
 
-from http.server import BaseHTTPRequestHandler
+app = Flask(__name__)
 
 
-class handler(BaseHTTPRequestHandler):
-    def do_POST(self):
-        content_length = int(self.headers.get("Content-Length", 0))
-        body = json.loads(self.rfile.read(content_length))
-        asyncio.run(process_update(body))
-        self.send_response(200)
-        self.end_headers()
-        self.wfile.write(b"ok")
+@app.route("/api/webhook", methods=["POST"])
+def webhook():
+    body = request.get_json()
+    asyncio.run(process_update(body))
+    return "ok", 200
 
-    def do_GET(self):
-        self.send_response(200)
-        self.end_headers()
-        self.wfile.write(b"Bot is running")
+
+@app.route("/api/webhook", methods=["GET"])
+def health():
+    return "Bot is running", 200
