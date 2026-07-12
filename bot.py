@@ -48,21 +48,11 @@ POPULAR_DEPARTMENTS = [
 
 
 def format_scholarship(i: int, s: Scholarship) -> str:
-    lines = [
-        f"{i}. {s.name}",
-        f"   {s.description[:300]}" if s.description else "",
-        f"   Kaynak: {s.source_name}",
-        f"   Link: {s.source_url}",
-    ]
-    return "\n".join(line for line in lines if line)
+    return f"{i}. {s.name}\n   {s.source_url}"
 
 
 def format_header(department: str, count: int) -> str:
-    return (
-        f"== {department.upper()} - BURS SONUCLARI ==\n"
-        f"{count} sonuc bulundu\n"
-        f"(Bilinen burs siteleri + Google taramasi)"
-    )
+    return f"{department} - {count} burs bulundu:"
 
 
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:

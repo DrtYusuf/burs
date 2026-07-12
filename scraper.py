@@ -9,6 +9,7 @@ Strateji:
 """
 
 import os
+import re
 import logging
 from dataclasses import dataclass
 from datetime import datetime
@@ -100,6 +101,52 @@ def _score(s: Scholarship, department: str) -> float:
     return score
 
 
+def _is_expired(text: str) -> bool:
+    """Icerik veya baslikta gecmis bir son basvuru tarihi varsa True doner."""
+    today = datetime.now()
+    # "31 Ocak 2025", "15.03.2025", "2025-01-31" gibi tarihleri yakala
+    turkish_months = {
+        "ocak": 1, "subat": 2, "şubat": 2, "mart": 3, "nisan": 4,
+        "mayis": 5, "mayıs": 5, "haziran": 6, "temmuz": 7, "agustos": 8,
+        "ağustos": 8, "eylul": 9, "eylül": 9, "ekim": 10, "kasim": 11,
+        "kasım": 11, "aralik": 12, "aralık": 12,
+    }
+    text_lower = text.lower()
+
+    # "31 Ocak 2025" formati
+    for match in re.finditer(r'(\d{1,2})\s+([\wşçğüöıİ]+)\s+(202\d)', text_lower):
+        day, month_str, year = int(match.group(1)), match.group(2), int(match.group(3))
+        month = turkish_months.get(month_str)
+        if month:
+            try:
+                date = datetime(year, month, day)
+                if date < today:
+                    return True
+            except ValueError:
+                pass
+
+    # "15.03.2025" veya "15/03/2025" formati
+    for match in re.finditer(r'(\d{1,2})[./](\d{1,2})[./](202\d)', text_lower):
+        day, month, year = int(match.group(1)), int(match.group(2)), int(match.group(3))
+        try:
+            date = datetime(year, month, day)
+            if date < today:
+                return True
+        except ValueError:
+            pass
+
+    # Eski yillara ait icerik (2024 ve oncesi, guncel yil haric)
+    current_year = datetime.now().year
+    old_year_pattern = re.findall(r'20[12]\d', text)
+    if old_year_pattern:
+        years_found = [int(y) for y in old_year_pattern]
+        # Sadece eski yillar varsa ve guncel yil yoksa
+        if all(y < current_year for y in years_found):
+            return True
+
+    return False
+
+
 def _deduplicate(scholarships: List[Scholarship]) -> List[Scholarship]:
     seen_urls: set = set()
     seen_titles: List[str] = []
@@ -155,6 +202,10 @@ def search_scholarships(department: str) -> List[Scholarship]:
                 if not any(kw in combined for kw in
                            ["burs", "kredi", "ogrenci", "basvuru", "scholarship",
                             "vakif", "destek", "hibe"]):
+                    continue
+
+                # Tarihi gecmis duyurulari filtrele
+                if _is_expired(title + " " + content):
                     continue
 
                 from urllib.parse import urlparse
