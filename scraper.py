@@ -41,12 +41,8 @@ def _build_queries(department: str) -> List[str]:
     return [
         f"{dep} burs basvurusu {y}",
         f"{dep} ogrencilerine burs veren kurumlar vakiflar {y}",
-        f"{dep} lisans yuksek lisans burs imkanlari {y}",
         f"universite ogrencilerine acik burs programlari {y}",
-        f"ozel sektor vakif belediye burs basvurusu {y}",
         f"KYK burs kredi basvuru {y}",
-        f"turkiye burslari basvuru {y}",
-        f"tubitak burs destek programlari {y}",
     ]
 
 
@@ -184,7 +180,7 @@ def search_scholarships(department: str) -> List[Scholarship]:
     seen_urls: set = set()
 
     # Paralel arama
-    with ThreadPoolExecutor(max_workers=4) as pool:
+    with ThreadPoolExecutor(max_workers=8) as pool:
         futures = {pool.submit(_tavily_search, client, q): q for q in queries}
         for future in as_completed(futures):
             results = future.result()
