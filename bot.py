@@ -1,8 +1,9 @@
 """
-Telegram Burs Botu - 3 gunde bir burs ve kredi duyurularini kontrol eder.
+Telegram Burs Botu - Kullanici bolumunu yazar, bot internetten
+o bolume uygun burs programlarini arar ve listeler.
 
 Kullanim:
-  1. .env dosyasina TELEGRAM_BOT_TOKEN ve TELEGRAM_CHAT_ID ekleyin
+  1. .env dosyasina TELEGRAM_BOT_TOKEN ekleyin
   2. pip install -r requirements.txt
   3. python bot.py
 """
@@ -11,14 +12,19 @@ import asyncio
 import logging
 import os
 import sys
-from datetime import datetime
 
 from dotenv import load_dotenv
-from telegram import Bot, Update
-from telegram.ext import Application, CommandHandler, ContextTypes
-from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from telegram import Update, ReplyKeyboardMarkup, ReplyKeyboardRemove
+from telegram.ext import (
+    Application,
+    CommandHandler,
+    MessageHandler,
+    ConversationHandler,
+    ContextTypes,
+    filters,
+)
 
-from scraper import scrape_all, Scholarship
+from scraper import search_scholarships, Scholarship
 
 load_dotenv()
 
@@ -29,171 +35,126 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
-CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 
-CHECK_INTERVAL_DAYS = 3
+BOLUM_SEC = 0
+
+POPULAR_DEPARTMENTS = [
+    ["Bilgisayar Mühendisliği", "Elektrik-Elektronik Müh."],
+    ["Makine Mühendisliği", "İnşaat Mühendisliği"],
+    ["Tıp", "Hukuk"],
+    ["İşletme", "İktisat"],
+    ["Eğitim", "Mimarlık"],
+]
 
 
-def format_scholarship(s: Scholarship) -> str:
-    """Tek bir burs bilgisini Telegram mesaji olarak formatlar."""
+def format_scholarship(i: int, s: Scholarship) -> str:
     lines = [
-        f"{'=' * 30}",
-        f"BURS ADI: {s.name}",
-        f"SINIFLAR: {s.grades}",
-        f"BOLUMLER: {s.departments}",
-        f"LISANS BURS UCRETI: {s.amount}",
+        f"{i}. {s.name}",
+        f"   {s.description[:300]}" if s.description else "",
+        f"   Kaynak: {s.source_name}",
+        f"   Link: {s.source_url}",
     ]
-    if s.source_url:
-        lines.append(f"DETAY: {s.source_url}")
-    lines.append(f"{'=' * 30}")
-    return "\n".join(lines)
+    return "\n".join(line for line in lines if line)
 
 
-def format_message(scholarships: list[Scholarship]) -> str:
-    """Tum burslari tek bir mesajda formatlar."""
-    header = (
-        f"BURS VE KREDI DUYURULARI\n"
-        f"Tarih: {datetime.now().strftime('%d.%m.%Y %H:%M')}\n"
-        f"Bulunan yeni burs/kredi sayisi: {len(scholarships)}\n"
+def format_header(department: str, count: int) -> str:
+    return (
+        f"== {department.upper()} - BURS SONUCLARI ==\n"
+        f"{count} sonuc bulundu\n"
+        f"(Bilinen burs siteleri + Google taramasi)"
     )
 
-    body = "\n\n".join(format_scholarship(s) for s in scholarships)
-    return f"{header}\n{body}"
+
+async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    reply_keyboard = ReplyKeyboardMarkup(
+        POPULAR_DEPARTMENTS,
+        one_time_keyboard=True,
+        resize_keyboard=True,
+        input_field_placeholder="Bölümünüzü yazın...",
+    )
+    await update.message.reply_text(
+        "Burs Botu'na hoşgeldiniz!\n\n"
+        "Bölümünüzü yazın veya listeden seçin.\n"
+        "İnternetten o bölüme uygun burs programlarını bulacağım.",
+        reply_markup=reply_keyboard,
+    )
+    return BOLUM_SEC
 
 
-async def check_and_notify(bot: Bot):
-    """Burslari kontrol et ve yeni burs varsa bildirim gonder."""
-    logger.info("Burs kontrolu baslatiliyor...")
+async def bolum_secildi(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    department = update.message.text.strip()
+    await update.message.reply_text(
+        f"\"{department}\" için internet taranıyor, bu biraz zaman alabilir...",
+        reply_markup=ReplyKeyboardRemove(),
+    )
 
     try:
-        new_scholarships = scrape_all()
+        scholarships = await asyncio.to_thread(search_scholarships, department)
     except Exception as e:
-        logger.error(f"Tarama sirasinda hata: {e}")
-        return
-
-    if not new_scholarships:
-        logger.info("Yeni burs bulunamadi.")
-        await bot.send_message(
-            chat_id=CHAT_ID,
-            text=(
-                f"BURS KONTROLU - {datetime.now().strftime('%d.%m.%Y')}\n\n"
-                "Yeni burs veya kredi duyurusu bulunamadi.\n"
-                "Bir sonraki kontrol 3 gun sonra yapilacak."
-            ),
+        logger.error(f"Burs arama hatasi: {e}")
+        await update.message.reply_text(
+            "Arama sırasında bir hata oluştu. Lütfen tekrar deneyin.\n/start"
         )
-        return
+        return ConversationHandler.END
 
-    message = format_message(new_scholarships)
+    if not scholarships:
+        await update.message.reply_text(
+            f"\"{department}\" için burs sonucu bulunamadı.\n\n"
+            "Farklı bir bölüm adı ile tekrar denemek için /start yazın."
+        )
+        return ConversationHandler.END
 
-    # Telegram mesaj limiti 4096 karakter, uzun mesajlari bol
+    header = format_header(department, len(scholarships))
+
+    entries = []
+    for i, s in enumerate(scholarships, 1):
+        entries.append(format_scholarship(i, s))
+
+    message = header + "\n\n" + "\n\n".join(entries)
+
+    # Telegram 4096 karakter limiti
     if len(message) <= 4096:
-        await bot.send_message(chat_id=CHAT_ID, text=message)
+        await update.message.reply_text(message, disable_web_page_preview=True)
     else:
-        # Mesaji parcalara bol
-        chunks = []
-        current = ""
-        for line in message.split("\n"):
-            if len(current) + len(line) + 1 > 4000:
-                chunks.append(current)
-                current = line
-            else:
-                current += "\n" + line if current else line
-        if current:
-            chunks.append(current)
+        chunks = [header]
+        for entry in entries:
+            if len(chunks[-1]) + len(entry) + 2 > 4000:
+                chunks.append("")
+            chunks[-1] += "\n\n" + entry
 
         for chunk in chunks:
-            await bot.send_message(chat_id=CHAT_ID, text=chunk)
-            await asyncio.sleep(1)
+            await update.message.reply_text(chunk.strip(), disable_web_page_preview=True)
+            await asyncio.sleep(0.5)
 
-    logger.info(f"{len(new_scholarships)} yeni burs bildirimi gonderildi.")
+    await update.message.reply_text("Başka bir bölüm aramak için /start yazın.")
+    return ConversationHandler.END
 
 
-async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Bot baslangic komutu."""
+async def cmd_iptal(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     await update.message.reply_text(
-        "Burs Botu aktif!\n\n"
-        "Komutlar:\n"
-        "/start - Botu baslat\n"
-        "/kontrol - Simdi burs kontrolu yap\n"
-        "/durum - Bot durumunu goster\n\n"
-        f"Otomatik kontrol her {CHECK_INTERVAL_DAYS} gunde bir yapilir."
+        "İşlem iptal edildi. /start ile tekrar başlayabilirsiniz.",
+        reply_markup=ReplyKeyboardRemove(),
     )
-    # Chat ID'yi goster (ilk kurulum icin faydali)
-    await update.message.reply_text(
-        f"Chat ID'niz: {update.effective_chat.id}\n"
-        "Bu ID'yi .env dosyaniza TELEGRAM_CHAT_ID olarak ekleyin."
-    )
-
-
-async def cmd_kontrol(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Manuel burs kontrolu komutu."""
-    await update.message.reply_text("Burs kontrolu yapiliyor, lutfen bekleyin...")
-    await check_and_notify(context.bot)
-
-
-async def cmd_durum(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Bot durum komutu."""
-    from scraper import load_seen
-    seen = load_seen()
-    await update.message.reply_text(
-        f"Bot Durumu\n"
-        f"Aktif: Evet\n"
-        f"Kontrol araligi: Her {CHECK_INTERVAL_DAYS} gun\n"
-        f"Kayitli burs sayisi: {len(seen)}\n"
-        f"Tarih: {datetime.now().strftime('%d.%m.%Y %H:%M')}"
-    )
-
-
-async def cmd_sifirla(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Gorulen burslari sifirla (tekrar bildirim almak icin)."""
-    from scraper import save_seen
-    save_seen(set())
-    await update.message.reply_text("Burs gecmisi sifirlandi. Bir sonraki kontrolde tum burslar yeni olarak gosterilecek.")
+    return ConversationHandler.END
 
 
 def main():
     if not BOT_TOKEN:
         print("HATA: TELEGRAM_BOT_TOKEN ayarlanmamis!")
-        print(".env dosyasina TELEGRAM_BOT_TOKEN=your_token seklinde ekleyin.")
-        print("Token almak icin Telegram'da @BotFather ile konusun.")
+        print(".env dosyasina TELEGRAM_BOT_TOKEN=your_token ekleyin.")
         sys.exit(1)
-
-    if not CHAT_ID:
-        print("UYARI: TELEGRAM_CHAT_ID ayarlanmamis!")
-        print("Botu baslattiktan sonra /start komutu ile Chat ID'nizi ogrenin.")
-        print("Ardindan .env dosyasina TELEGRAM_CHAT_ID=id seklinde ekleyin.")
 
     app = Application.builder().token(BOT_TOKEN).build()
 
-    # Komut handlerlari
-    app.add_handler(CommandHandler("start", cmd_start))
-    app.add_handler(CommandHandler("kontrol", cmd_kontrol))
-    app.add_handler(CommandHandler("durum", cmd_durum))
-    app.add_handler(CommandHandler("sifirla", cmd_sifirla))
-
-    # 3 gunluk zamanlayici
-    scheduler = AsyncIOScheduler()
-    scheduler.add_job(
-        check_and_notify,
-        trigger="interval",
-        days=CHECK_INTERVAL_DAYS,
-        args=[app.bot],
-        next_run_time=datetime.now(),  # Ilk calistirmada hemen kontrol et
+    conv_handler = ConversationHandler(
+        entry_points=[CommandHandler("start", cmd_start)],
+        states={
+            BOLUM_SEC: [MessageHandler(filters.TEXT & ~filters.COMMAND, bolum_secildi)],
+        },
+        fallbacks=[CommandHandler("iptal", cmd_iptal)],
     )
 
-    async def post_init(application):
-        scheduler.start()
-        logger.info(f"Zamanlayici baslatildi: her {CHECK_INTERVAL_DAYS} gunde bir kontrol.")
-        if CHAT_ID:
-            try:
-                await application.bot.send_message(
-                    chat_id=CHAT_ID,
-                    text=f"Burs Botu baslatildi! Her {CHECK_INTERVAL_DAYS} gunde bir burs kontrolu yapilacak.",
-                )
-            except Exception as e:
-                logger.warning(f"Baslangic mesaji gonderilemedi: {e}")
-
-    app.post_init = post_init
+    app.add_handler(conv_handler)
 
     logger.info("Bot baslatiliyor...")
     app.run_polling(allowed_updates=Update.ALL_TYPES)
