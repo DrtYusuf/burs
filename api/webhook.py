@@ -18,9 +18,6 @@ from telegram.ext import (
     filters,
 )
 
-import sys
-from pathlib import Path
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from scraper import search_scholarships, Scholarship
 
 load_dotenv()
