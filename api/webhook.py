@@ -7,10 +7,7 @@ import asyncio
 import logging
 import json
 
-from dotenv import load_dotenv
 from telegram import Update, Bot, ReplyKeyboardMarkup, ReplyKeyboardRemove
-
-load_dotenv()
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
