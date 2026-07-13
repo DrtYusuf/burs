@@ -3,17 +3,18 @@ Vercel serverless function - Telegram webhook endpoint.
 """
 
 import os
-import asyncio
-import logging
 import json
+import logging
+from http.server import BaseHTTPRequestHandler
+from concurrent.futures import ThreadPoolExecutor
 
-from telegram import Update, Bot, ReplyKeyboardMarkup, ReplyKeyboardRemove
+import requests as req
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
-bot = Bot(token=BOT_TOKEN)
+API_URL = f"https://api.telegram.org/bot{BOT_TOKEN}"
 
 POPULAR_DEPARTMENTS = [
     ["Bilgisayar Mühendisliği", "Elektrik-Elektronik Müh."],
@@ -24,77 +25,73 @@ POPULAR_DEPARTMENTS = [
 ]
 
 
+def send_message(chat_id, text, reply_markup=None):
+    payload = {
+        "chat_id": chat_id,
+        "text": text,
+        "disable_web_page_preview": True,
+    }
+    if reply_markup:
+        payload["reply_markup"] = json.dumps(reply_markup)
+    req.post(f"{API_URL}/sendMessage", json=payload)
+
+
 def format_scholarship(i, s):
     return f"{i}. {s.name}\n   {s.source_url}"
 
 
-async def handle_message(update_data: dict):
-    update = Update.de_json(update_data, bot)
-
-    if not update.message:
+def handle_update(body):
+    message = body.get("message")
+    if not message:
         return
 
-    text = update.message.text or ""
-    chat_id = update.message.chat_id
+    text = message.get("text", "")
+    chat_id = message["chat"]["id"]
 
     if text == "/start":
-        keyboard = [[btn for btn in row] for row in POPULAR_DEPARTMENTS]
-        reply_markup = ReplyKeyboardMarkup(
-            keyboard,
-            one_time_keyboard=True,
-            resize_keyboard=True,
-            input_field_placeholder="Bölümünüzü yazın...",
-        )
-        await bot.send_message(
-            chat_id=chat_id,
-            text="Burs Botu'na hoşgeldiniz!\n\n"
-                 "Bölümünüzü yazın veya listeden seçin.\n"
-                 "İnternetten o bölüme uygun burs programlarını bulacağım.",
+        reply_markup = {
+            "keyboard": POPULAR_DEPARTMENTS,
+            "one_time_keyboard": True,
+            "resize_keyboard": True,
+            "input_field_placeholder": "Bölümünüzü yazın...",
+        }
+        send_message(
+            chat_id,
+            "Burs Botu'na hoşgeldiniz!\n\n"
+            "Bölümünüzü yazın veya listeden seçin.\n"
+            "İnternetten o bölüme uygun burs programlarını bulacağım.",
             reply_markup=reply_markup,
         )
         return
 
     if text == "/iptal":
-        await bot.send_message(
-            chat_id=chat_id,
-            text="İşlem iptal edildi. /start ile tekrar başlayabilirsiniz.",
-            reply_markup=ReplyKeyboardRemove(),
-        )
+        send_message(chat_id, "İşlem iptal edildi. /start ile tekrar başlayabilirsiniz.",
+                     reply_markup={"remove_keyboard": True})
         return
 
-    # Bolum secildi
     department = text.strip()
-    await bot.send_message(
-        chat_id=chat_id,
-        text=f"\"{department}\" için internet taranıyor, bu biraz zaman alabilir...",
-        reply_markup=ReplyKeyboardRemove(),
-    )
+    send_message(chat_id, f"\"{department}\" için internet taranıyor, bu biraz zaman alabilir...",
+                 reply_markup={"remove_keyboard": True})
 
     try:
         from scraper import search_scholarships
-        scholarships = await asyncio.to_thread(search_scholarships, department)
+        scholarships = search_scholarships(department)
     except Exception as e:
         logger.error(f"Burs arama hatasi: {e}")
-        await bot.send_message(
-            chat_id=chat_id,
-            text="Arama sırasında bir hata oluştu. Lütfen tekrar deneyin.\n/start",
-        )
+        send_message(chat_id, "Arama sırasında bir hata oluştu. Lütfen tekrar deneyin.\n/start")
         return
 
     if not scholarships:
-        await bot.send_message(
-            chat_id=chat_id,
-            text=f"\"{department}\" için burs sonucu bulunamadı.\n\n"
-                 "Farklı bir bölüm adı ile tekrar denemek için /start yazın.",
-        )
+        send_message(chat_id, f"\"{department}\" için burs sonucu bulunamadı.\n\n"
+                     "Farklı bir bölüm adı ile tekrar denemek için /start yazın.")
         return
 
     header = f"{department} - {len(scholarships)} burs bulundu:"
     entries = [format_scholarship(i, s) for i, s in enumerate(scholarships, 1)]
-    message = header + "\n\n" + "\n\n".join(entries)
+    msg = header + "\n\n" + "\n\n".join(entries)
 
-    if len(message) <= 4096:
-        await bot.send_message(chat_id=chat_id, text=message, disable_web_page_preview=True)
+    if len(msg) <= 4096:
+        send_message(chat_id, msg)
     else:
         chunks = [header]
         for entry in entries:
@@ -102,19 +99,16 @@ async def handle_message(update_data: dict):
                 chunks.append("")
             chunks[-1] += "\n\n" + entry
         for chunk in chunks:
-            await bot.send_message(chat_id=chat_id, text=chunk.strip(), disable_web_page_preview=True)
+            send_message(chat_id, chunk.strip())
 
-    await bot.send_message(chat_id=chat_id, text="Başka bir bölüm aramak için /start yazın.")
-
-
-from http.server import BaseHTTPRequestHandler
+    send_message(chat_id, "Başka bir bölüm aramak için /start yazın.")
 
 
 class handler(BaseHTTPRequestHandler):
     def do_POST(self):
         content_length = int(self.headers.get("Content-Length", 0))
         body = json.loads(self.rfile.read(content_length))
-        asyncio.run(handle_message(body))
+        handle_update(body)
         self.send_response(200)
         self.end_headers()
         self.wfile.write(b"ok")
