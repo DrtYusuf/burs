@@ -97,6 +97,26 @@ def _score(s: Scholarship, department: str) -> float:
     return score
 
 
+def _has_application_date(text: str) -> bool:
+    """Icerik veya baslikta bir basvuru tarihi geciyorsa True doner."""
+    text_lower = text.lower()
+    # "31 Ocak 2025" formati
+    if re.search(r'\d{1,2}\s+(?:ocak|subat|şubat|mart|nisan|mayis|mayıs|haziran|temmuz|agustos|ağustos|eylul|eylül|ekim|kasim|kasım|aralik|aralık)\s+202\d', text_lower):
+        return True
+    # "15.03.2025" veya "15/03/2025" formati
+    if re.search(r'\d{1,2}[./]\d{1,2}[./]202\d', text_lower):
+        return True
+    # "2025-01-31" formati
+    if re.search(r'202\d-\d{2}-\d{2}', text_lower):
+        return True
+    # "son basvuru", "basvuru tarihi", "son tarih" gibi ifadeler
+    if re.search(r'son\s*(basvuru|başvuru|tarih)', text_lower):
+        return True
+    if re.search(r'(basvuru|başvuru)\s*tarih', text_lower):
+        return True
+    return False
+
+
 def _is_expired(text: str) -> bool:
     """Icerik veya baslikta gecmis bir son basvuru tarihi varsa True doner."""
     today = datetime.now()
@@ -198,6 +218,10 @@ def search_scholarships(department: str) -> List[Scholarship]:
                 if not any(kw in combined for kw in
                            ["burs", "kredi", "ogrenci", "basvuru", "scholarship",
                             "vakif", "destek", "hibe"]):
+                    continue
+
+                # Basvuru tarihi icermeyen sonuclari filtrele
+                if not _has_application_date(title + " " + content):
                     continue
 
                 # Tarihi gecmis duyurulari filtrele
