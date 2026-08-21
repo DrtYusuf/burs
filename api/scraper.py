@@ -97,6 +97,21 @@ def _score(s: Scholarship, department: str) -> float:
     return score
 
 
+NEWS_DOMAIN_KEYWORDS = [
+    "haber", "news", "gazete", "hurriyet", "milliyet", "sabah", "sozcu",
+    "ntv", "cnn", "bbc", "trthaber", "haberturk", "ensonhaber", "mynet",
+    "aksam", "yenisafak", "cumhuriyet", "star.com", "posta.com",
+    "ahaber", "tvnet", "bloomberght", "dha", "iha.com", "aa.com",
+    "medya", "gundem", "magazin", "sondakika",
+]
+
+
+def _is_news_source(url: str) -> bool:
+    """URL bir haber sitesine aitse True doner."""
+    url_lower = url.lower()
+    return any(kw in url_lower for kw in NEWS_DOMAIN_KEYWORDS)
+
+
 def _has_application_date(text: str) -> bool:
     """Icerik veya baslikta bir basvuru tarihi geciyorsa True doner."""
     text_lower = text.lower()
@@ -212,6 +227,10 @@ def search_scholarships(department: str) -> List[Scholarship]:
                 if url in seen_urls or not title:
                     continue
                 seen_urls.add(url)
+
+                # Haber sitelerini filtrele
+                if _is_news_source(url):
+                    continue
 
                 # Burs ile ilgisi olmayanlari filtrele
                 combined = (title + " " + content).lower()
