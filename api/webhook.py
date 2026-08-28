@@ -142,7 +142,10 @@ class handler(BaseHTTPRequestHandler):
     def do_POST(self):
         content_length = int(self.headers.get("Content-Length", 0))
         body = json.loads(self.rfile.read(content_length))
-        handle_update(body)
+        try:
+            handle_update(body)
+        except Exception as e:
+            logger.error(f"handle_update hatasi: {e}", exc_info=True)
         self.send_response(200)
         self.end_headers()
         self.wfile.write(b"ok")
