@@ -108,18 +108,28 @@ def handle_update(body):
                      "Farklı bir bölüm adı ile tekrar denemek için /start yazın.")
         return
 
-    header = f"{department} - {len(scholarships)} burs bulundu:"
-    entries = [format_scholarship(i, s) for i, s in enumerate(scholarships, 1)]
-    msg = header + "\n\n" + "\n\n".join(entries)
+    # Gemini ile akilli filtreleme
+    from filter_ai import filter_scholarships
+    filtered = filter_scholarships(department, scholarships)
+
+    if filtered:
+        msg = filtered
+    else:
+        # Gemini basarisiz olursa eski formata don
+        header = f"{department} - {len(scholarships)} burs bulundu:"
+        entries = [format_scholarship(i, s) for i, s in enumerate(scholarships, 1)]
+        msg = header + "\n\n" + "\n\n".join(entries)
 
     if len(msg) <= 4096:
         send_message(chat_id, msg)
     else:
-        chunks = [header]
-        for entry in entries:
-            if len(chunks[-1]) + len(entry) + 2 > 4000:
+        # Uzun mesajlari parcala
+        lines = msg.split("\n")
+        chunks = [""]
+        for line in lines:
+            if len(chunks[-1]) + len(line) + 1 > 4000:
                 chunks.append("")
-            chunks[-1] += "\n\n" + entry
+            chunks[-1] += line + "\n"
         for chunk in chunks:
             send_message(chat_id, chunk.strip())
 
