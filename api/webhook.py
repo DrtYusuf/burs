@@ -109,6 +109,8 @@ def handle_update(body):
         return
 
     # Gemini ile akilli filtreleme
+    import sys
+    sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
     from filter_ai import filter_scholarships
     filtered = filter_scholarships(department, scholarships)
 
