@@ -86,4 +86,4 @@ def filter_scholarships(department, scholarships):
         return response.text
     except Exception as e:
         logger.error(f"Gemini API hatasi: {e}")
-        return None
+        return f"[Gemini hata: {e}]"
