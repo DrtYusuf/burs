@@ -1,7 +1,12 @@
 {
+  "builds": [
+    {
+      "src": "api/*.py",
+      "use": "@vercel/python"
+    }
+  ],
   "functions": {
     "api/*.py": {
-      "runtime": "@vercel/python",
       "maxDuration": 60
     }
   }
