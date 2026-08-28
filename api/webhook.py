@@ -25,6 +25,17 @@ POPULAR_DEPARTMENTS = [
 ]
 
 
+BOT_COMMANDS = [
+    {"command": "start", "description": "Burs aramaya basla"},
+    {"command": "yardim", "description": "Nasil kullanilir?"},
+    {"command": "iptal", "description": "Islemi iptal et"},
+]
+
+
+def set_bot_commands():
+    req.post(f"{API_URL}/setMyCommands", json={"commands": BOT_COMMANDS})
+
+
 def send_message(chat_id, text, reply_markup=None):
     payload = {
         "chat_id": chat_id,
@@ -61,6 +72,17 @@ def handle_update(body):
             "Bölümünüzü yazın veya listeden seçin.\n"
             "İnternetten o bölüme uygun burs programlarını bulacağım.",
             reply_markup=reply_markup,
+        )
+        return
+
+    if text == "/yardim":
+        send_message(
+            chat_id,
+            "Burs Botu Kullanim Kilavuzu\n\n"
+            "/start - Bolumunuzu secin veya yazin, size uygun burslari bulayim.\n"
+            "/iptal - Devam eden islemi iptal edin.\n"
+            "/yardim - Bu mesaji tekrar gorun.\n\n"
+            "Listeden bir bolum secebilir veya dogrudan yazabilirsiniz.",
         )
         return
 
@@ -114,6 +136,7 @@ class handler(BaseHTTPRequestHandler):
         self.wfile.write(b"ok")
 
     def do_GET(self):
+        set_bot_commands()
         self.send_response(200)
         self.end_headers()
-        self.wfile.write(b"Bot is running")
+        self.wfile.write(b"Bot is running - commands set")
