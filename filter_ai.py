@@ -79,7 +79,7 @@ def filter_scholarships(department, scholarships):
     try:
         genai.configure(api_key=GEMINI_API_KEY)
         model = genai.GenerativeModel(
-            model_name="gemini-2.0-flash",
+            model_name="gemini-3.6-flash",
             system_instruction=SYSTEM_PROMPT,
         )
         response = model.generate_content(user_prompt)
